@@ -23,4 +23,19 @@ app.get('/', (req : Request , res : Response) => {
     res.send('Hello World!');
 })
 
+app.get('/myWebsites' , (req : Request , res : Response) => {
+    res.json({
+        websites : [
+            {
+                name : "Typing Speed Test" ,
+                url : "https://typee7.vercel.app"
+            } ,
+            {
+                name : "College Festival Website" ,
+                url : "https://sambhrama-fest.vercel.app"
+            }
+        ]
+    })
+})
+
 export default app;

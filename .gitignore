@@ -41,3 +41,7 @@ build/
 
 # Unnecessary stray lock file
 package-lock 2.json
+
+#git secrets 
+private 
+private.pub

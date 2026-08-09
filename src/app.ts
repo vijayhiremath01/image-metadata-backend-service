@@ -1,41 +1,48 @@
 import express, { type Express, type Request, type Response } from 'express';
 import rateLimit from "express-rate-limit";
+import photoRoutes from "@/router/photo.routes";
+import categoryRoutes from "@/router/category.routes";
+import authRoutes from "@/router/auth.routes";
+import userRoutes from "@/router/user.routes";
+import "dotenv/config";
 
-
-const limiter = rateLimit({
-    windowMs : 60 * 1000,
-    max : 3 ,
-    handler : (req : Request , res : Response) => {
+const globalLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 100,
+    handler: (req: Request, res: Response) => {
         console.warn(`Rate limit exceeded for IP: ${req.ip}`);
-         res.status(429).json({
-        message : 'Too many requests, please try again later.'
-    })
+        res.status(429).json({
+            success: false,
+            message: 'Too many requests, please try again later.'
+        })
     }
 })
 
 const app: Express = express();
-const port = 3000 ; 
+const port = 3000;
 
+app.use(globalLimiter);
+app.use(express.json());
 
-app.use(limiter);
+app.get("/", (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: "Halo Wallpaper Backend API 🚀",
+  });
+});
 
-app.get('/', (req : Request , res : Response) => {
-    res.send('Hello World!');
-})
+app.get("/health", (req, res) => {
+  res.status(200).json({
+    success: true,
+    status: "Healthy",
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+  });
+});
 
-app.get('/myWebsites' , (req : Request , res : Response) => {
-    res.json({
-        websites : [
-            {
-                name : "Typing Speed Test" ,
-                url : "https://typee7.vercel.app"
-            } ,
-            {
-                name : "College Festival Website" ,
-                url : "https://sambhrama-fest.vercel.app"
-            }
-        ]
-    })
-})
+app.use('/api/auth', authRoutes);
+app.use('/api/users', userRoutes);
+app.use('/api/photos', photoRoutes);
+app.use('/api/categories', categoryRoutes);
 
 export default app;

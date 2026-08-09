@@ -1,0 +1,1 @@
+ALTER TABLE "photos" ADD COLUMN "imagekit_file_id" varchar(255);

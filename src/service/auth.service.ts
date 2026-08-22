@@ -139,12 +139,7 @@ export async function login(input: LoginInput): Promise<AuthResult> {
     username: user.username,
   });
 
-  console.log('DEBUG login - refreshToken:', refreshToken);
-  console.log('DEBUG login - refreshToken length:', refreshToken.length);
-
   const refreshTokenHash = hashRefreshToken(refreshToken);
-
-  console.log('DEBUG login - refreshTokenHash:', refreshTokenHash);
 
   await db.insert(sessions).values({
     userId: user.id,
@@ -175,16 +170,11 @@ export async function refresh(refreshToken: string): Promise<AuthResult> {
     throw new Error('INVALID_REFRESH_TOKEN');
   }
 
-  console.log('DEBUG refresh - payload:', payload);
-  console.log('DEBUG refresh - refreshToken:', refreshToken);
-
   const [session] = await db
     .select()
     .from(sessions)
     .where(and(eq(sessions.sessionId, payload.sessionId), eq(sessions.userId, payload.sub)))
     .limit(1);
-
-  console.log('DEBUG refresh - session from DB:', session);
 
   if (!session) {
     throw new Error('SESSION_NOT_FOUND');
@@ -200,11 +190,8 @@ export async function refresh(refreshToken: string): Promise<AuthResult> {
   }
 
   const refreshTokenHash = hashRefreshToken(refreshToken);
-  console.log('DEBUG refresh - computed hash:', refreshTokenHash);
-  console.log('DEBUG refresh - stored hash:', session.refreshTokenHash);
   
   const isValid = await verifyPassword(refreshToken, session.refreshTokenHash);
-  console.log('DEBUG refresh - isValid:', isValid);
   
   if (!isValid) {
     throw new Error('INVALID_REFRESH_TOKEN');

@@ -73,6 +73,8 @@ export const uploadPhoto = async (req: MulterRequest & AuthRequest, res: Respons
       sizeBytes: result.size,
       fileFormat: result.fileType,
       imagekitFileId: result.fileId,
+      blurHash: result.blurHash,
+      hexColor: result.hexColor,
     });
 
     return res.status(201).json({

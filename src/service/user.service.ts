@@ -43,10 +43,61 @@ export async function getUserProfile(userId: string) {
     email: user.email,
     username: user.username,
     avatarUrl: user.avatarUrl,
+    displayName: user.displayName,
+    bio: user.bio,
+    website: user.website,
     photosCount: photosCountResult.count,
     likesReceived: likesReceivedResult.count,
     createdAt: user.createdAt,
   };
+}
+
+export async function updateProfile(userId: string, data: { displayName?: string; bio?: string; website?: string }): Promise<typeof users.$inferSelect> {
+  const updates: Partial<typeof users.$inferInsert> = {};
+  
+  if (data.displayName !== undefined) {
+    if (data.displayName.length > 100) {
+      throw new Error('DISPLAY_NAME_TOO_LONG');
+    }
+    updates.displayName = data.displayName.trim() || null;
+  }
+  
+  if (data.bio !== undefined) {
+    if (data.bio.length > 500) {
+      throw new Error('BIO_TOO_LONG');
+    }
+    updates.bio = data.bio.trim() || null;
+  }
+  
+  if (data.website !== undefined) {
+    if (data.website.length > 500) {
+      throw new Error('WEBSITE_TOO_LONG');
+    }
+    if (data.website && !/^https?:\/\//.test(data.website)) {
+      throw new Error('INVALID_WEBSITE_URL');
+    }
+    updates.website = data.website.trim() || null;
+  }
+
+  updates.updatedAt = new Date();
+
+  const [updated] = await db
+    .update(users)
+    .set(updates)
+    .where(eq(users.id, userId))
+    .returning();
+
+  return updated;
+}
+
+export async function updateAvatar(userId: string, avatarUrl: string): Promise<typeof users.$inferSelect> {
+  const [updated] = await db
+    .update(users)
+    .set({ avatarUrl, updatedAt: new Date() })
+    .where(eq(users.id, userId))
+    .returning();
+
+  return updated;
 }
 
 export async function getMyPhotos(userId: string, pagination: PaginationParams): Promise<PaginatedResult<typeof photos.$inferSelect>> {

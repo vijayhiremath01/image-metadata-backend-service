@@ -4,6 +4,10 @@ import photoRoutes from "@/router/photo.routes";
 import categoryRoutes from "@/router/category.routes";
 import authRoutes from "@/router/auth.routes";
 import userRoutes from "@/router/user.routes";
+import followRoutes from "@/router/follow.routes";
+import boardRoutes from "@/router/board.routes";
+import commentRoutes from "@/router/comment.routes";
+import publicProfileRoutes from "@/router/publicProfile.routes";
 import "dotenv/config";
 
 const globalLimiter = rateLimit({
@@ -42,7 +46,11 @@ app.get("/health", (req, res) => {
 
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/users', followRoutes);
+app.use('/api/boards', boardRoutes);
 app.use('/api/photos', photoRoutes);
+app.use('/api/photos', commentRoutes);
 app.use('/api/categories', categoryRoutes);
+app.use('/api/users', publicProfileRoutes);
 
 export default app;

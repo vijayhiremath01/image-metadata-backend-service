@@ -1,5 +1,6 @@
 import express, { type Express, type Request, type Response } from 'express';
 import rateLimit from "express-rate-limit";
+import cors from "cors";
 import photoRoutes from "@/router/photo.routes";
 import categoryRoutes from "@/router/category.routes";
 import authRoutes from "@/router/auth.routes";
@@ -24,6 +25,29 @@ const globalLimiter = rateLimit({
 
 const app: Express = express();
 const port = 3000;
+
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:5173',
+  'http://127.0.0.1:3000',
+  'http://10.53.65.204:3000',
+  'https://your-frontend-domain.com',
+];
+
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin) || origin.match(/^http:\/\/(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+):\d+$/)) {
+      callback(null, true);
+    } else {
+      console.warn('CORS blocked origin:', origin);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
 
 app.use(globalLimiter);
 app.use(express.json());

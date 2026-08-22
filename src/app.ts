@@ -1,6 +1,7 @@
-import express, { type Express, type Request, type Response } from 'express';
+import express, { type Express, type Request, type Response, type NextFunction } from 'express';
 import rateLimit from "express-rate-limit";
 import cors from "cors";
+import helmet from "helmet";
 import photoRoutes from "@/router/photo.routes";
 import categoryRoutes from "@/router/category.routes";
 import authRoutes from "@/router/auth.routes";
@@ -24,20 +25,44 @@ const globalLimiter = rateLimit({
 })
 
 const app: Express = express();
-const port = 3000;
 
-const allowedOrigins = [
-  'http://localhost:3000',
-  'http://localhost:5173',
-  'http://127.0.0.1:3000',
-  'http://10.53.65.204:3000',
-  'https://your-frontend-domain.com',
-];
+// Trust proxy for reverse proxy (nginx) support
+app.set("trust proxy", 1);
+
+// Security headers with Helmet
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" }, // Allow ImageKit images
+  contentSecurityPolicy: false, // Disable CSP to avoid issues with ImageKit
+  xPoweredBy: false, // Hide Express fingerprint
+}));
+
+// CORS configuration
+const getAllowedOrigins = (): string[] => {
+  const frontendUrl = process.env.FRONTEND_URL;
+  
+  // If FRONTEND_URL is set, use it (production)
+  if (frontendUrl) {
+    return [frontendUrl];
+  }
+  
+  // Development origins
+  return [
+    'http://localhost:3000',
+    'http://localhost:3001',
+    'http://localhost:5173',
+    'http://127.0.0.1:3000',
+    'http://127.0.0.1:5173',
+  ];
+};
+
+const allowedOrigins = getAllowedOrigins();
 
 app.use(cors({
   origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, curl, etc.)
     if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin) || origin.match(/^http:\/\/(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+):\d+$/)) {
+    
+    if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
       console.warn('CORS blocked origin:', origin);
@@ -48,6 +73,24 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
+
+// Request logging middleware (excludes sensitive data)
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const start = Date.now();
+  
+  // Capture original end to log after response
+  const originalEnd = res.end.bind(res);
+  res.end = function(chunk?: any, encoding?: any, cb?: any) {
+    const duration = Date.now() - start;
+    const sanitizedUrl = req.url.replace(/\/api\/auth\/(login|register|refresh)/, '/api/auth/[auth]');
+    
+    console.log(`${req.method} ${sanitizedUrl} ${res.statusCode} ${duration}ms`);
+    
+    return originalEnd(chunk, encoding, cb);
+  } as typeof res.end;
+  
+  next();
+});
 
 app.use(globalLimiter);
 app.use(express.json());
@@ -61,10 +104,9 @@ app.get("/", (req, res) => {
 
 app.get("/health", (req, res) => {
   res.status(200).json({
-    success: true,
-    status: "Healthy",
+    status: "ok",
+    service: "HALO Backend",
     uptime: process.uptime(),
-    timestamp: new Date().toISOString(),
   });
 });
 

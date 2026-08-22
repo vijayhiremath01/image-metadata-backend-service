@@ -13,7 +13,7 @@ import { authMiddleware } from '@/middleware/auth.middleware';
 const router = Router();
 
 const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
+  windowMs: 60 * 1000,
   max: 10,
   handler: (req: Request, res: Response) => {
     res.status(429).json({

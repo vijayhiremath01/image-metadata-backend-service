@@ -43,6 +43,12 @@ const allowedOrigins = [
   'http://13.60.74.79:3000',
 ];
 
+// Add production frontend URL from env
+const frontendUrl = process.env.FRONTEND_URL;
+if (frontendUrl) {
+  allowedOrigins.push(frontendUrl);
+}
+
 app.use(cors({
   origin: (origin, callback) => {
     // Allow requests with no origin (mobile apps, curl, etc.)

@@ -37,25 +37,11 @@ app.use(helmet({
 }));
 
 // CORS configuration
-const getAllowedOrigins = (): string[] => {
-  const frontendUrl = process.env.FRONTEND_URL;
-  
-  // If FRONTEND_URL is set, use it (production)
-  if (frontendUrl) {
-    return [frontendUrl];
-  }
-  
-  // Development origins
-  return [
-    'http://localhost:3000',
-    'http://localhost:3001',
-    'http://localhost:5173',
-    'http://127.0.0.1:3000',
-    'http://127.0.0.1:5173',
-  ];
-};
-
-const allowedOrigins = getAllowedOrigins();
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:5173',
+  'http://13.60.74.79:3000',
+];
 
 app.use(cors({
   origin: (origin, callback) => {
@@ -69,10 +55,13 @@ app.use(cors({
       callback(new Error('Not allowed by CORS'));
     }
   },
-  credentials: true,
+  credentials: false,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
+
+// Handle preflight requests
+app.options("*", cors());
 
 // Request logging middleware (excludes sensitive data)
 app.use((req: Request, res: Response, next: NextFunction) => {

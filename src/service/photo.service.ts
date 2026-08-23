@@ -5,6 +5,8 @@ import { imagekit } from "@/config/imagekit.config";
 import { recordImpression, recordView, recordDownload, recordShare, recordSave } from './photoAnalytics.service';
 import { updateInterestScore } from './userInterest.service';
 import { createLikeNotification, createSaveNotification } from './notification.service';
+import { redisService } from '@/services/redis.service';
+import { getQueue, QUEUE_NAMES } from '@/config/bull.config';
 
 export interface PaginationParams {
   page: number;
@@ -56,6 +58,9 @@ export async function createPhoto(data: {
       cameraModel: data.cameraModel || null,
     })
     .returning();
+
+  // Invalidate feed caches
+  await redisService.invalidateFeedCaches();
 
   return photo;
 }
@@ -135,6 +140,15 @@ export async function getAllPhotosWithLikeState(
   userId?: string
 ): Promise<PaginatedResult<PhotoWithLikeState>> {
   const { page, limit } = pagination;
+
+  // Try cache first for page 1
+  if (page === 1 && !userId) {
+    const cached = await redisService.getFeed('foryou', 1);
+    if (cached) {
+      return cached;
+    }
+  }
+
   const offset = (page - 1) * limit;
 
   const [data, totalResult] = await Promise.all([
@@ -165,13 +179,20 @@ export async function getAllPhotosWithLikeState(
     saved: savedState.get(photo.id) ?? false,
   }));
 
-  return {
+  const result = {
     data: dataWithState,
     total,
     page,
     limit,
     hasNext: page * limit < total,
   };
+
+  // Cache page 1 for anonymous users
+  if (page === 1 && !userId) {
+    await redisService.setFeed('foryou', 1, result);
+  }
+
+  return result;
 }
 
 export async function getPhotoById(id: string) {
@@ -257,29 +278,14 @@ export async function likePhoto(photoId: string, userId: string): Promise<{ like
     throw new Error("PHOTO_NOT_FOUND");
   }
 
-  const [existingLike] = await db
-    .select()
-    .from(photoLikes)
-    .where(and(eq(photoLikes.photoId, photoId), eq(photoLikes.userId, userId)))
-    .limit(1);
-
-  if (existingLike) {
+  // Check Redis first for instant response
+  const redisResult = await redisService.likePhoto(photoId, userId);
+  if (!redisResult.liked) {
     throw new Error("ALREADY_LIKED");
   }
 
-  await db.transaction(async (tx) => {
-    await tx.insert(photoLikes).values({ photoId, userId });
-    await tx
-      .update(photos)
-      .set({ likesCount: sql`${photos.likesCount} + 1` })
-      .where(eq(photos.id, photoId));
-  });
-
-  const [updated] = await db
-    .select({ likesCount: photos.likesCount })
-    .from(photos)
-    .where(eq(photos.id, photoId))
-    .limit(1);
+  // Queue for DB sync
+  await getQueue(QUEUE_NAMES.LIKE).add('like', { photoId, userId, action: 'like' });
 
   if (photo.userId !== userId) {
     await createLikeNotification(photoId, photo.userId, userId);
@@ -287,7 +293,7 @@ export async function likePhoto(photoId: string, userId: string): Promise<{ like
 
   await updateInterestScore(userId, `category:${photo.id}`, 2);
 
-  return { likesCount: updated.likesCount, liked: true };
+  return { likesCount: redisResult.likesCount, liked: true };
 }
 
 export async function unlikePhoto(photoId: string, userId: string): Promise<{ likesCount: number; liked: boolean }> {
@@ -296,36 +302,16 @@ export async function unlikePhoto(photoId: string, userId: string): Promise<{ li
     throw new Error("PHOTO_NOT_FOUND");
   }
 
-  const [existingLike] = await db
-    .select()
-    .from(photoLikes)
-    .where(and(eq(photoLikes.photoId, photoId), eq(photoLikes.userId, userId)))
-    .limit(1);
-
-  if (!existingLike) {
+  // Use Redis for instant response
+  const redisResult = await redisService.unlikePhoto(photoId, userId);
+  if (redisResult.liked) {
     throw new Error("NOT_LIKED");
   }
 
-  await db.transaction(async (tx) => {
-    await tx.delete(photoLikes).where(and(eq(photoLikes.photoId, photoId), eq(photoLikes.userId, userId)));
-    await tx
-      .update(photos)
-      .set({ likesCount: sql`${photos.likesCount} - 1` })
-      .where(eq(photos.id, photoId));
-  });
+  // Queue for DB sync
+  await getQueue(QUEUE_NAMES.LIKE).add('like', { photoId, userId, action: 'unlike' });
 
-  const [updated] = await db
-    .select({ likesCount: photos.likesCount })
-    .from(photos)
-    .where(eq(photos.id, photoId))
-    .limit(1);
-
-  const newCount = Math.max(0, updated.likesCount);
-  if (newCount !== updated.likesCount) {
-    await db.update(photos).set({ likesCount: 0 }).where(eq(photos.id, photoId));
-  }
-
-  return { likesCount: newCount, liked: false };
+  return { likesCount: redisResult.likesCount, liked: false };
 }
 
 export async function sharePhoto(photoId: string, userId: string): Promise<{ sharesCount: number }> {
@@ -334,20 +320,13 @@ export async function sharePhoto(photoId: string, userId: string): Promise<{ sha
     throw new Error("PHOTO_NOT_FOUND");
   }
 
-  await db
-    .update(photos)
-    .set({ sharesCount: sql`${photos.sharesCount} + 1` })
-    .where(eq(photos.id, photoId));
+  // Use Redis for instant response
+  const sharesCount = await redisService.incrementShares(photoId);
 
-  const [updated] = await db
-    .select({ sharesCount: photos.sharesCount })
-    .from(photos)
-    .where(eq(photos.id, photoId))
-    .limit(1);
+  // Queue for DB sync
+  await getQueue(QUEUE_NAMES.SHARE).add('share', { photoId, userId });
 
-  await recordShare(photoId);
-
-  return { sharesCount: updated.sharesCount };
+  return { sharesCount };
 }
 
 export async function viewPhoto(photoId: string, ipAddress: string, userAgent: string | undefined): Promise<void> {
@@ -356,15 +335,11 @@ export async function viewPhoto(photoId: string, ipAddress: string, userAgent: s
     throw new Error("PHOTO_NOT_FOUND");
   }
 
-  await db.transaction(async (tx) => {
-    await tx.insert(photoViews).values({ photoId, ipAddress, userAgent });
-    await tx
-      .update(photos)
-      .set({ viewsCount: sql`${photos.viewsCount} + 1` })
-      .where(eq(photos.id, photoId));
-  });
+  // Use Redis for instant response
+  await redisService.incrementViews(photoId);
 
-  await recordView(photoId);
+  // Queue for DB sync
+  await getQueue(QUEUE_NAMES.VIEW).add('view', { photoId, ipAddress, userAgent });
 }
 
 export async function downloadPhoto(photoId: string, ipAddress: string, userAgent: string | undefined): Promise<string> {
@@ -373,15 +348,11 @@ export async function downloadPhoto(photoId: string, ipAddress: string, userAgen
     throw new Error("PHOTO_NOT_FOUND");
   }
 
-  await db.transaction(async (tx) => {
-    await tx.insert(photoDownloads).values({ photoId, ipAddress, userAgent });
-    await tx
-      .update(photos)
-      .set({ downloadsCount: sql`${photos.downloadsCount} + 1` })
-      .where(eq(photos.id, photoId));
-  });
+  // Use Redis for instant response
+  await redisService.incrementDownloads(photoId);
 
-  await recordDownload(photoId);
+  // Queue for DB sync
+  await getQueue(QUEUE_NAMES.DOWNLOAD).add('download', { photoId, ipAddress, userAgent });
 
   return photo.originalUrl;
 }
@@ -490,6 +461,10 @@ export async function deletePhoto(id: string, userId: string): Promise<void> {
   }
 
   await db.delete(photos).where(eq(photos.id, id));
+
+  // Invalidate caches
+  await redisService.invalidateFeedCaches();
+  await redisService.invalidatePhoto(id);
 }
 
 export async function getPhotosByCategorySlug(slug: string, pagination: PaginationParams): Promise<PaginatedResult<typeof photos.$inferSelect>> {
@@ -588,6 +563,15 @@ export async function getTrendingPhotosWithLikeState(
   userId?: string
 ): Promise<PaginatedResult<PhotoWithLikeState>> {
   const { page, limit } = pagination;
+
+  // Try cache first for page 1
+  if (page === 1 && !userId) {
+    const cached = await redisService.getFeed('trending', 1);
+    if (cached) {
+      return cached;
+    }
+  }
+
   const offset = (page - 1) * limit;
 
   const [data, totalResult] = await Promise.all([
@@ -625,13 +609,20 @@ export async function getTrendingPhotosWithLikeState(
     saved: savedState.get(photo.id) ?? false,
   }));
 
-  return {
+  const result = {
     data: dataWithState,
     total,
     page,
     limit,
     hasNext: page * limit < total,
   };
+
+  // Cache page 1 for anonymous users
+  if (page === 1 && !userId) {
+    await redisService.setFeed('trending', 1, result);
+  }
+
+  return result;
 }
 
 export async function getLatestPhotosWithLikeState(
@@ -639,6 +630,15 @@ export async function getLatestPhotosWithLikeState(
   userId?: string
 ): Promise<PaginatedResult<PhotoWithLikeState>> {
   const { page, limit } = pagination;
+
+  // Try cache first for page 1
+  if (page === 1 && !userId) {
+    const cached = await redisService.getFeed('latest', 1);
+    if (cached) {
+      return cached;
+    }
+  }
+
   const offset = (page - 1) * limit;
 
   const [data, totalResult] = await Promise.all([
@@ -669,13 +669,20 @@ export async function getLatestPhotosWithLikeState(
     saved: savedState.get(photo.id) ?? false,
   }));
 
-  return {
+  const result = {
     data: dataWithState,
     total,
     page,
     limit,
     hasNext: page * limit < total,
   };
+
+  // Cache page 1 for anonymous users
+  if (page === 1 && !userId) {
+    await redisService.setFeed('latest', 1, result);
+  }
+
+  return result;
 }
 
 export async function searchPhotosWithLikeState(

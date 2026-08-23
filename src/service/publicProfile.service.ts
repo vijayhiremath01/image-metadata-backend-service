@@ -3,6 +3,7 @@ import { users, photos, photoLikes, boardPhotos, boards } from '@/db/schema';
 import { eq, and, count, desc, sql, inArray } from 'drizzle-orm';
 import { getFollowCounts, isFollowing } from './follow.service';
 import { getMyPhotos } from './user.service';
+import { redisService } from '@/services/redis.service';
 
 export interface PaginationParams {
   page: number;
@@ -46,16 +47,17 @@ export async function getPublicProfile(username: string, currentUserId?: string)
 
   if (!user) return null;
 
-  const [followCounts, photosCountResult, followingStatus] = await Promise.all([
-    getFollowCounts(user.id),
+  const [followersCount, followingCount, photosCountResult, followingStatus] = await Promise.all([
+    redisService.getFollowersCount(user.id),
+    redisService.getFollowingCount(user.id),
     db.select({ count: count() }).from(photos).where(and(eq(photos.userId, user.id), eq(photos.isActive, true))),
-    currentUserId ? isFollowing(currentUserId, user.id) : Promise.resolve(false),
+    currentUserId ? redisService.isFollowing(currentUserId, user.id) : Promise.resolve(false),
   ]);
 
   return {
     ...user,
-    followersCount: followCounts.followersCount,
-    followingCount: followCounts.followingCount,
+    followersCount,
+    followingCount,
     photosCount: photosCountResult[0].count,
     isFollowing: followingStatus,
   };

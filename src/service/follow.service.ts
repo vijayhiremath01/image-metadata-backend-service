@@ -1,6 +1,8 @@
 import { db } from '@/db/db-connection';
 import { userFollows, users } from '@/db/schema';
 import { eq, and, count, inArray, sql } from 'drizzle-orm';
+import { redisService } from '@/services/redis.service';
+import { getQueue, QUEUE_NAMES } from '@/config/bull.config';
 
 export interface PaginationParams {
   page: number;
@@ -30,21 +32,19 @@ export async function followUser(followerId: string, followingId: string): Promi
     throw new Error('USER_NOT_FOUND');
   }
 
-  await db
-    .insert(userFollows)
-    .values({ followerId, followingId })
-    .onConflictDoNothing();
+  // Use Redis for instant response
+  await redisService.followUser(followerId, followingId);
+
+  // Queue for DB sync
+  await getQueue(QUEUE_NAMES.FOLLOW).add('follow', { followerId, followingId, action: 'follow' });
 }
 
 export async function unfollowUser(followerId: string, followingId: string): Promise<void> {
-  const [deleted] = await db
-    .delete(userFollows)
-    .where(and(eq(userFollows.followerId, followerId), eq(userFollows.followingId, followingId)))
-    .returning({ id: userFollows.id });
+  // Use Redis for instant response
+  await redisService.unfollowUser(followerId, followingId);
 
-  if (!deleted) {
-    throw new Error('NOT_FOLLOWING');
-  }
+  // Queue for DB sync
+  await getQueue(QUEUE_NAMES.FOLLOW).add('follow', { followerId, followingId, action: 'unfollow' });
 }
 
 export async function getFollowers(userId: string, pagination: PaginationParams, currentUserId?: string): Promise<PaginatedResult<{ id: string; username: string; avatarUrl: string | null; displayName: string | null; isFollowing: boolean }>> {

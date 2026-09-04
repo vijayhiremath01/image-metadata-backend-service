@@ -3,17 +3,23 @@ import { db } from '@/db/db-connection';
 import { photos } from '@/db/schema';
 import { eq, sql } from 'drizzle-orm';
 import { createWorker, QUEUE_NAMES } from '@/config/bull.config';
+import { redisService } from '@/services/redis.service';
 
-const shareWorker = createWorker<{ photoId: string; userId?: string }>(
+const shareWorker = createWorker<{ photoId: string; userId?: string; timestamp: number }>(
   QUEUE_NAMES.SHARE,
   async (job: Job) => {
-    const { photoId } = job.data;
+    const { photoId, timestamp } = job.data;
     
     try {
-      // Increment shares count in photos table
+      // Use atomic increment with reconciliation
+      await redisService.incrementShares(photoId);
+      
+      // Update DB with the new count
+      const redisCountAfter = await redisService.getShares(photoId);
+      
       await db
         .update(photos)
-        .set({ sharesCount: sql`${photos.sharesCount} + 1` })
+        .set({ sharesCount: redisCountAfter })
         .where(eq(photos.id, photoId));
     } catch (error) {
       console.error(`[ShareWorker] Error processing job ${job.id}:`, error);

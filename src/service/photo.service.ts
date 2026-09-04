@@ -323,8 +323,8 @@ export async function sharePhoto(photoId: string, userId: string): Promise<{ sha
   // Use Redis for instant response
   const sharesCount = await redisService.incrementShares(photoId);
 
-  // Queue for DB sync
-  await getQueue(QUEUE_NAMES.SHARE).add('share', { photoId, userId });
+  // Queue for DB sync with timestamp for ordering
+  await getQueue(QUEUE_NAMES.SHARE).add('share', { photoId, userId, timestamp: Date.now() });
 
   return { sharesCount };
 }
@@ -338,8 +338,8 @@ export async function viewPhoto(photoId: string, ipAddress: string, userAgent: s
   // Use Redis for instant response
   await redisService.incrementViews(photoId);
 
-  // Queue for DB sync
-  await getQueue(QUEUE_NAMES.VIEW).add('view', { photoId, ipAddress, userAgent });
+  // Queue for DB sync with timestamp for ordering
+  await getQueue(QUEUE_NAMES.VIEW).add('view', { photoId, ipAddress, userAgent, timestamp: Date.now() });
 }
 
 export async function downloadPhoto(photoId: string, ipAddress: string, userAgent: string | undefined): Promise<string> {
@@ -351,8 +351,8 @@ export async function downloadPhoto(photoId: string, ipAddress: string, userAgen
   // Use Redis for instant response
   await redisService.incrementDownloads(photoId);
 
-  // Queue for DB sync
-  await getQueue(QUEUE_NAMES.DOWNLOAD).add('download', { photoId, ipAddress, userAgent });
+  // Queue for DB sync with timestamp for ordering
+  await getQueue(QUEUE_NAMES.DOWNLOAD).add('download', { photoId, ipAddress, userAgent, timestamp: Date.now() });
 
   return photo.originalUrl;
 }

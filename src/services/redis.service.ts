@@ -107,8 +107,13 @@ export class RedisService {
 
     const likesCount = results?.[1]?.[1] as number || 1;
 
-    // Queue for DB sync
-    await getQueue(QUEUE_NAMES.LIKE).add('like', { photoId, userId, action: 'like' });
+    // Queue for DB sync with timestamp for ordering
+    await getQueue(QUEUE_NAMES.LIKE).add('like', { 
+      photoId, 
+      userId, 
+      action: 'like',
+      timestamp: Date.now()
+    });
 
     return { likesCount, liked: true };
   }
@@ -129,8 +134,13 @@ export class RedisService {
 
     const likesCount = Math.max(0, (results?.[1]?.[1] as number) || 0);
 
-    // Queue for DB sync
-    await getQueue(QUEUE_NAMES.LIKE).add('like', { photoId, userId, action: 'unlike' });
+    // Queue for DB sync with timestamp for ordering
+    await getQueue(QUEUE_NAMES.LIKE).add('like', { 
+      photoId, 
+      userId, 
+      action: 'unlike',
+      timestamp: Date.now()
+    });
 
     return { likesCount, liked: false };
   }
@@ -151,7 +161,12 @@ export class RedisService {
     pipeline.sadd(followingKey, followerId);
     await pipeline.exec();
 
-    await getQueue(QUEUE_NAMES.FOLLOW).add('follow', { followerId, followingId, action: 'follow' });
+    await getQueue(QUEUE_NAMES.FOLLOW).add('follow', { 
+      followerId, 
+      followingId, 
+      action: 'follow',
+      timestamp: Date.now()
+    });
   }
 
   async unfollowUser(followerId: string, followingId: string): Promise<void> {
@@ -166,7 +181,12 @@ export class RedisService {
     pipeline.srem(followingKey, followerId);
     await pipeline.exec();
 
-    await getQueue(QUEUE_NAMES.FOLLOW).add('follow', { followerId, followingId, action: 'unfollow' });
+    await getQueue(QUEUE_NAMES.FOLLOW).add('follow', { 
+      followerId, 
+      followingId, 
+      action: 'unfollow',
+      timestamp: Date.now()
+    });
   }
 
   async getFollowersCount(userId: string): Promise<number> {

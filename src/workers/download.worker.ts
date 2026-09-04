@@ -3,11 +3,12 @@ import { db } from '@/db/db-connection';
 import { photos, photoDownloads } from '@/db/schema';
 import { eq, sql } from 'drizzle-orm';
 import { createWorker, QUEUE_NAMES } from '@/config/bull.config';
+import { redisService } from '@/services/redis.service';
 
-const downloadWorker = createWorker<{ photoId: string; ipAddress?: string; userAgent?: string }>(
+const downloadWorker = createWorker<{ photoId: string; ipAddress?: string; userAgent?: string; timestamp: number }>(
   QUEUE_NAMES.DOWNLOAD,
   async (job: Job) => {
-    const { photoId, ipAddress, userAgent } = job.data;
+    const { photoId, ipAddress, userAgent, timestamp } = job.data;
     
     try {
       // Record the download in photoDownloads table
@@ -17,10 +18,15 @@ const downloadWorker = createWorker<{ photoId: string; ipAddress?: string; userA
         userAgent: userAgent || 'unknown'
       });
 
-      // Increment downloads count in photos table
+      // Use atomic increment with reconciliation
+      await redisService.incrementDownloads(photoId);
+      
+      // Update DB with the new count
+      const redisCountAfter = await redisService.getDownloads(photoId);
+      
       await db
         .update(photos)
-        .set({ downloadsCount: sql`${photos.downloadsCount} + 1` })
+        .set({ downloadsCount: redisCountAfter })
         .where(eq(photos.id, photoId));
     } catch (error) {
       console.error(`[DownloadWorker] Error processing job ${job.id}:`, error);
